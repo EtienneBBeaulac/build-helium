@@ -39,19 +39,19 @@ abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
     abstract val workerExecutor: WorkerExecutor
 
     @get:Input
-    val workItems: Property<Int> = project.objects.property(Int::class.java).convention(300)
+    abstract val workItems: Property<Int>
 
     @get:Input
-    val rounds: Property<Int> = project.objects.property(Int::class.java).convention(120)
+    abstract val rounds: Property<Int>
 
     @get:Input
-    val sizeKB: Property<Int> = project.objects.property(Int::class.java).convention(96)
+    abstract val sizeKB: Property<Int>
 
     @get:Input
-    val useDisk: Property<Boolean> = project.objects.property(Boolean::class.java).convention(true)
+    abstract val useDisk: Property<Boolean>
 
     @get:Input
-    val deterministic: Property<Boolean> = project.objects.property(Boolean::class.java).convention(true)
+    abstract val deterministic: Property<Boolean>
 
     @get:OutputDirectory
     abstract val outDir: DirectoryProperty
@@ -66,9 +66,14 @@ abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
         outputs.upToDateWhen { false }  // always run
         outputs.cacheIf { false }       // never cache
 
-        // Default output locations under build/helium
+        // Default output locations under build/helium and property defaults
         outDir.convention(project.layout.buildDirectory.dir("helium/outputs"))
         inDir.convention(project.layout.buildDirectory.dir("helium/inputs"))
+        workItems.convention(300)
+        rounds.convention(120)
+        sizeKB.convention(96)
+        useDisk.convention(true)
+        deterministic.convention(true)
     }
 
     @TaskAction
