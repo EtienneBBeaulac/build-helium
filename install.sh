@@ -42,18 +42,35 @@ fetch "init/gradle-tuner.init.gradle.kts" "${GRADLE_INIT_DIR}/gradle-tuner.init.
 fetch "init/helium-benchmark.init.gradle.kts" "${GRADLE_INIT_DIR}/helium-benchmark.init.gradle.kts"
 
 # ---------- 4) PATH setup ----------
-# Ensure ~/bin is on PATH for the current shell in future sessions
-PROFILE=""
-if [[ -n "${ZSH_VERSION:-}" ]]; then PROFILE="${HOME}/.zshrc"; fi
-if [[ -n "${BASH_VERSION:-}" ]]; then PROFILE="${HOME}/.bashrc"; fi
-# Fall back to .profile if neither bash nor zsh detected
-if [[ -z "$PROFILE" ]]; then PROFILE="${HOME}/.profile"; fi
+# Ensure ~/bin is on PATH for the user's login shell in future sessions
+OS="$(uname -s || true)"
+LOGIN_SHELL="${SHELL:-}"
+if [[ -z "$LOGIN_SHELL" ]] && command -v dscl >/dev/null 2>&1; then
+  LOGIN_SHELL="$(dscl . -read "/Users/${USER}" UserShell 2>/dev/null | awk '{print $2}' || true)"
+fi
+
+declare -a PROFILE_FILES=()
+if [[ "$LOGIN_SHELL" == */zsh ]]; then
+  # On macOS, zsh reads .zprofile for login shells and .zshrc for interactive shells
+  PROFILE_FILES+=("${HOME}/.zshrc")
+  [[ "$OS" == "Darwin" ]] && PROFILE_FILES+=("${HOME}/.zprofile")
+elif [[ "$LOGIN_SHELL" == */bash ]]; then
+  if [[ "$OS" == "Darwin" ]]; then
+    PROFILE_FILES+=("${HOME}/.bash_profile")
+  else
+    PROFILE_FILES+=("${HOME}/.bashrc")
+  fi
+else
+  PROFILE_FILES+=("${HOME}/.profile")
+fi
 
 if ! echo ":$PATH:" | grep -q ":${HOME}/bin:"; then
-  if ! grep -qs 'export PATH="$HOME/bin:$PATH"' "$PROFILE"; then
-    echo 'export PATH="$HOME/bin:$PATH"' >> "$PROFILE"
-    echo "[build-helium] Added \$HOME/bin to PATH in ${PROFILE}. Restart your shell or 'source' your profile."
-  fi
+  for PROFILE in "${PROFILE_FILES[@]}"; do
+    if ! grep -qs 'export PATH="$HOME/bin:$PATH"' "$PROFILE"; then
+      echo 'export PATH="$HOME/bin:$PATH"' >> "$PROFILE"
+      echo "[build-helium] Added \$HOME/bin to PATH in ${PROFILE}. Restart your shell or 'source' your profile."
+    fi
+  done
 fi
 
 # ---------- 5) Seed default config (only if missing) ----------
