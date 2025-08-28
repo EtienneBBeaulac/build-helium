@@ -19,6 +19,7 @@
 
 import org.gradle.api.DefaultTask
 import org.gradle.api.Project
+import org.gradle.api.Action
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
@@ -99,7 +100,7 @@ abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
                 f
             } else null
 
-            queue.submit(HeliumHashAction::class.java) { params ->
+            queue.submit(HeliumHashAction::class.java) { params: HeliumHashAction.Params ->
                 params.index.set(idx)
                 params.sizeKB.set(sz)
                 params.repeat.set(r)
@@ -167,20 +168,22 @@ gradle.rootProject {
     fun Project.propBool(name: String): Boolean? =
         (findProperty(name) as String?)?.toBooleanStrictOrNull()
 
-    tasks.register("heliumBenchmark", HeliumBenchmark::class.java) { task ->
+    val heliumBenchmark = tasks.register("heliumBenchmark", HeliumBenchmark::class.java)
+    heliumBenchmark.configure(Action<HeliumBenchmark> { task ->
         propInt("helium.actions")?.let { v -> task.actions.set(v) }
         propInt("helium.repeats")?.let { v -> task.repeats.set(v) }
         propInt("helium.sizeKB") ?.let { v -> task.sizeKB.set(v) }
         propBool("helium.useDisk")?.let { v -> task.useDisk.set(v) }
         propBool("helium.deterministic")?.let { v -> task.deterministic.set(v) }
-    }
+    })
 
-    tasks.register("heliumBenchmarkBig", HeliumBenchmark::class.java) { task ->
+    val heliumBenchmarkBig = tasks.register("heliumBenchmarkBig", HeliumBenchmark::class.java)
+    heliumBenchmarkBig.configure(Action<HeliumBenchmark> { task ->
         task.actions.set(500)
         task.repeats.set(160)
         task.sizeKB.set(128)
         // Carry over global -P toggles if present:
         propBool("helium.useDisk")?.let { v -> task.useDisk.set(v) }
         propBool("helium.deterministic")?.let { v -> task.deterministic.set(v) }
-    }
+    })
 }
