@@ -137,9 +137,9 @@ measure_case() {
     local tmp; tmp="$(mktemp)"
     set +e
     if [[ "$TIME_KIND" == "bsd" ]]; then
-      /usr/bin/time -l ./gradlew "${TASK}" 2>"$tmp"
+      /usr/bin/time -l ./gradlew "${TASK}" >/dev/null 2>"$tmp"
     else
-      /usr/bin/time -v ./gradlew "${TASK}" 2>"$tmp"
+      /usr/bin/time -v ./gradlew "${TASK}" >/dev/null 2>"$tmp"
     fi
     local rc=$?
     set -e

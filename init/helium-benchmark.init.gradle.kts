@@ -18,6 +18,7 @@
 // - If useDisk=false, payloads are generated (re)producibly inside each worker.
 
 import org.gradle.api.DefaultTask
+import org.gradle.api.Project
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
@@ -52,17 +53,21 @@ abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
     val deterministic: Property<Boolean> = project.objects.property(Boolean::class.java).convention(true)
 
     @get:OutputDirectory
-    val outDir: DirectoryProperty = project.layout.buildDirectory.dir("helium/outputs")
+    abstract val outDir: DirectoryProperty
 
     // For disk mode we also materialize inputs so Gradle knows where they go.
     @get:OutputDirectory
-    val inDir: DirectoryProperty = project.layout.buildDirectory.dir("helium/inputs")
+    abstract val inDir: DirectoryProperty
 
     init {
         group = "verification"
         description = "Synthetic CPU+alloc (+optional I/O) workload for build-helium tuning"
         outputs.upToDateWhen { false }  // always run
         outputs.cacheIf { false }       // never cache
+
+        // Default output locations under build/helium
+        outDir.convention(project.layout.buildDirectory.dir("helium/outputs"))
+        inDir.convention(project.layout.buildDirectory.dir("helium/inputs"))
     }
 
     @TaskAction
@@ -94,15 +99,15 @@ abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
                 f
             } else null
 
-            queue.submit(HeliumHashAction::class.java) {
-                it.index.set(idx)
-                it.sizeKB.set(sz)
-                it.repeat.set(r)
-                it.salt.set(salt)
-                it.useDisk.set(doDisk)
-                it.deterministic.set(deterministic.get())
-                if (inputFile != null) it.inputFile.set(inputFile)
-                it.outputFile.set(output)
+            queue.submit(HeliumHashAction::class.java) { params ->
+                params.index.set(idx)
+                params.sizeKB.set(sz)
+                params.repeat.set(r)
+                params.salt.set(salt)
+                params.useDisk.set(doDisk)
+                params.deterministic.set(deterministic.get())
+                if (inputFile != null) params.inputFile.set(inputFile)
+                params.outputFile.set(output)
             }
         }
 
@@ -162,20 +167,20 @@ gradle.rootProject {
     fun Project.propBool(name: String): Boolean? =
         (findProperty(name) as String?)?.toBooleanStrictOrNull()
 
-    tasks.register("heliumBenchmark", HeliumBenchmark::class.java) {
-        propInt("helium.actions")?.let(it.actions::set)
-        propInt("helium.repeats")?.let(it.repeats::set)
-        propInt("helium.sizeKB") ?.let(it.sizeKB::set)
-        propBool("helium.useDisk")?.let(it.useDisk::set)
-        propBool("helium.deterministic")?.let(it.deterministic::set)
+    tasks.register("heliumBenchmark", HeliumBenchmark::class.java) { task ->
+        propInt("helium.actions")?.let { v -> task.actions.set(v) }
+        propInt("helium.repeats")?.let { v -> task.repeats.set(v) }
+        propInt("helium.sizeKB") ?.let { v -> task.sizeKB.set(v) }
+        propBool("helium.useDisk")?.let { v -> task.useDisk.set(v) }
+        propBool("helium.deterministic")?.let { v -> task.deterministic.set(v) }
     }
 
-    tasks.register("heliumBenchmarkBig", HeliumBenchmark::class.java) {
-        actions.set(500)
-        repeats.set(160)
-        sizeKB.set(128)
+    tasks.register("heliumBenchmarkBig", HeliumBenchmark::class.java) { task ->
+        task.actions.set(500)
+        task.repeats.set(160)
+        task.sizeKB.set(128)
         // Carry over global -P toggles if present:
-        propBool("helium.useDisk")?.let(useDisk::set)
-        propBool("helium.deterministic")?.let(deterministic::set)
+        propBool("helium.useDisk")?.let { v -> task.useDisk.set(v) }
+        propBool("helium.deterministic")?.let { v -> task.deterministic.set(v) }
     }
 }
