@@ -39,10 +39,10 @@ abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
     abstract val workerExecutor: WorkerExecutor
 
     @get:Input
-    val actions: Property<Int> = project.objects.property(Int::class.java).convention(300)
+    val workItems: Property<Int> = project.objects.property(Int::class.java).convention(300)
 
     @get:Input
-    val repeats: Property<Int> = project.objects.property(Int::class.java).convention(120)
+    val rounds: Property<Int> = project.objects.property(Int::class.java).convention(120)
 
     @get:Input
     val sizeKB: Property<Int> = project.objects.property(Int::class.java).convention(96)
@@ -74,15 +74,15 @@ abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
     @TaskAction
     fun run() {
         val queue = workerExecutor.noIsolation()
-        val salt = System.nanoTime().toString() // differentiates runs; fed into hashing
+        val saltStr = System.nanoTime().toString() // differentiates runs; fed into hashing
         val out = outDir.get().asFile.apply { mkdirs() }
         val inRoot = inDir.get().asFile
 
         val doDisk = useDisk.get()
         if (doDisk) inRoot.mkdirs()
 
-        val a = actions.get()
-        val r = repeats.get()
+        val a = workItems.get()
+        val r = rounds.get()
         val sz = sizeKB.get()
 
         repeat(a) { idx ->
@@ -100,22 +100,22 @@ abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
                 f
             } else null
 
-            queue.submit(HeliumHashAction::class.java) { params: HeliumHashAction.Params ->
+            queue.submit(HeliumHashAction::class.java, Action<HeliumHashAction.Params> { params ->
                 params.index.set(idx)
                 params.sizeKB.set(sz)
-                params.repeat.set(r)
-                params.salt.set(salt)
+                params.rounds.set(r)
+                params.salt.set(saltStr)
                 params.useDisk.set(doDisk)
                 params.deterministic.set(deterministic.get())
                 if (inputFile != null) params.inputFile.set(inputFile)
                 params.outputFile.set(output)
-            }
+            })
         }
 
         workerExecutor.await()
 
         logger.lifecycle(
-            "heliumBenchmark: {} actions × {} repeats × {} KB (useDisk={}, deterministic={})",
+            "heliumBenchmark: {} items × {} rounds × {} KB (useDisk={}, deterministic={})",
             a, r, sz, doDisk, deterministic.get()
         )
     }
@@ -125,7 +125,7 @@ abstract class HeliumHashAction : WorkAction<HeliumHashAction.Params> {
     interface Params : WorkParameters {
         val index: Property<Int>
         val sizeKB: Property<Int>
-        val repeat: Property<Int>
+        val rounds: Property<Int>
         val salt: Property<String>
         val useDisk: Property<Boolean>
         val deterministic: Property<Boolean>
@@ -151,7 +151,7 @@ abstract class HeliumHashAction : WorkAction<HeliumHashAction.Params> {
 
         val md = MessageDigest.getInstance("SHA-256")
         var digest = payload
-        repeat(parameters.repeat.get()) {
+        repeat(parameters.rounds.get()) {
             md.update(digest)
             md.update(parameters.salt.get().toByteArray())
             digest = md.digest()
@@ -170,8 +170,8 @@ gradle.rootProject {
 
     val heliumBenchmark = tasks.register("heliumBenchmark", HeliumBenchmark::class.java)
     heliumBenchmark.configure(Action<HeliumBenchmark> { task ->
-        propInt("helium.actions")?.let { v -> task.actions.set(v) }
-        propInt("helium.repeats")?.let { v -> task.repeats.set(v) }
+        propInt("helium.actions")?.let { v -> task.workItems.set(v) }
+        propInt("helium.repeats")?.let { v -> task.rounds.set(v) }
         propInt("helium.sizeKB") ?.let { v -> task.sizeKB.set(v) }
         propBool("helium.useDisk")?.let { v -> task.useDisk.set(v) }
         propBool("helium.deterministic")?.let { v -> task.deterministic.set(v) }
@@ -179,8 +179,8 @@ gradle.rootProject {
 
     val heliumBenchmarkBig = tasks.register("heliumBenchmarkBig", HeliumBenchmark::class.java)
     heliumBenchmarkBig.configure(Action<HeliumBenchmark> { task ->
-        task.actions.set(500)
-        task.repeats.set(160)
+        task.workItems.set(500)
+        task.rounds.set(160)
         task.sizeKB.set(128)
         // Carry over global -P toggles if present:
         propBool("helium.useDisk")?.let { v -> task.useDisk.set(v) }
