@@ -51,6 +51,8 @@ Flags:
   --json-only          Only write JSON
   --tag <string>       Suffix for report filenames
   --big                Use "heliumBenchmarkBig"
+  --progress           Show spinner/progress (default)
+  --no-progress        Disable spinner/progress
 
 Env overrides:
   W_T W_R W_G          Score weights (time, RSS, GC)
@@ -125,7 +127,7 @@ start_spinner(){
   (
     i=0
     while :; do
-      printf "\r[%s] benchmarking…" "${frames[$((i%10))]}"
+      printf "\r[%s] benchmarking…" "${frames[$((i%10))]}" >&2
       i=$((i+1))
       sleep 0.1
     done
@@ -134,7 +136,7 @@ start_spinner(){
 stop_spinner(){
   [[ -n "${spinner_pid}" ]] && kill "${spinner_pid}" >/dev/null 2>&1 || true
   spinner_pid=""
-  [[ "${SHOW_PROGRESS}" == "1" ]] && printf "\r%*s\r" 40 ""
+  [[ "${SHOW_PROGRESS}" == "1" ]] && printf "\r%*s\r" 40 "" >&2
 }
 
 # ---------- Helpers ----------
@@ -170,6 +172,7 @@ measure_case() {
     set -e
     if [[ $rc -ne 0 ]]; then
       rm -f "$tmp"
+      stop_spinner
       echo "WALL=99999 RSS_KB=99999999 GC_PCT=100.0"
       unset ORG_GRADLE_PROJECT_org__gradle__jvmargs ORG_GRADLE_PROJECT_kotlin__daemon__jvmargs ORG_GRADLE_PROJECT_org__gradle__workers__max
       return
