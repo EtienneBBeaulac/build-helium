@@ -24,6 +24,7 @@ W_T=${W_T:-1.0}                        # score weights
 W_R=${W_R:-0.00001}
 W_G=${W_G:-5.0}
 GCLOG_DIR="/tmp/build-helium-gclogs"
+SHOW_PROGRESS=1
 
 # ---------- Args ----------
 while [[ $# -gt 0 ]]; do
@@ -34,6 +35,8 @@ while [[ $# -gt 0 ]]; do
     --json-only)  JSON_ONLY=1; NO_MD=1; NO_HTML=1; shift ;;
     --tag)        TAG="-$2"; shift 2 ;;
     --big)        TASK="heliumBenchmarkBig"; shift ;;
+    --no-progress) SHOW_PROGRESS=0; shift ;;
+    --progress)   SHOW_PROGRESS=1; shift ;;
     --help|-h)
       cat <<'HELP'
 helium-tune [TASK] [flags]
@@ -114,6 +117,26 @@ else
 fi
 echo "Candidates:"; for c in "${CANDIDATES[@]}"; do echo "  $c"; done
 
+# ---------- Progress UI ----------
+spinner_pid=""
+start_spinner(){
+  [[ "${SHOW_PROGRESS}" != "1" ]] && return
+  local frames=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+  (
+    i=0
+    while :; do
+      printf "\r[%s] benchmarking…" "${frames[$((i%10))]}"
+      i=$((i+1))
+      sleep 0.1
+    done
+  ) & spinner_pid=$!
+}
+stop_spinner(){
+  [[ -n "${spinner_pid}" ]] && kill "${spinner_pid}" >/dev/null 2>&1 || true
+  spinner_pid=""
+  [[ "${SHOW_PROGRESS}" == "1" ]] && printf "\r%*s\r" 40 ""
+}
+
 # ---------- Helpers ----------
 measure_case() {
   local name="$1" gr_xmx="$2" kt_xmx="$3" workers="$4"
@@ -130,9 +153,11 @@ measure_case() {
   [[ -n "${GRADLE_VERSION_KEY}" ]] && rm -rf "${HOME}/.gradle/daemon/${GRADLE_VERSION_KEY}" >/dev/null 2>&1 || true
 
   # Warmups
+  echo "  ~ warmup x${WARMUP_RUNS}"
   for _ in $(seq 1 "${WARMUP_RUNS}"); do ./gradlew -q "${TASK}" >/dev/null || true; done
 
   local total=0 rss_peak=0
+  start_spinner
   for _ in $(seq 1 "${MEASURED_RUNS}"); do
     local tmp; tmp="$(mktemp)"
     set +e
@@ -153,11 +178,12 @@ measure_case() {
     local real_s rss_kb
     if [[ "$TIME_KIND" == "bsd" ]]; then
       real_s=$(grep -Eo '([0-9]+\.[0-9]+) real' "$tmp" | awk '{print $1}' || true)
-      rss_kb=$(grep -i "maximum resident set size" "$tmp" | awk '{print $1}' || echo 0)
+      rss_kb=$(sed -nE 's/.*[Mm]aximum resident set size[^0-9]*([0-9]+).*/\1/p' "$tmp" | head -n1)
     else
       real_s=$(awk -F': ' '/Elapsed \(wall clock\) time/ {print $2}' "$tmp" | awk -F: '{ if (NF==3) print $1*3600+$2*60+$3; else print $1*60+$2 }')
-      rss_kb=$(awk -F': ' '/Maximum resident set size/ {print $2}' "$tmp")
+      rss_kb=$(awk -F': ' '/Maximum resident set size/ {print $2}' "$tmp" | tr -dc '0-9')
     fi
+    [[ -z "${rss_kb:-}" ]] && rss_kb=0
     rm -f "$tmp"
 
     total=$("$PYTHON" - <<PY
@@ -167,6 +193,7 @@ PY
 )
     if [[ "${rss_kb:-0}" -gt "${rss_peak:-0}" ]]; then rss_peak="$rss_kb"; fi
   done
+  stop_spinner
 
   local avg; avg=$("$PYTHON" - <<PY
 t=float("${total}"); n=float("${MEASURED_RUNS}")
