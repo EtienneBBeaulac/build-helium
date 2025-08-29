@@ -2,7 +2,10 @@
 set -euo pipefail
 IN="$1"; OUT="${2:-${IN%.json}.html}"
 
-python - <<'PY' "$IN" "$OUT"
+PYTHON="python3"
+command -v python3 >/dev/null 2>&1 || PYTHON="python"
+
+"$PYTHON" - <<'PY' "$IN" "$OUT"
 import json, sys
 from html import escape
 

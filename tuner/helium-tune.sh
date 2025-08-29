@@ -25,6 +25,18 @@ W_R=${W_R:-0.00001}
 W_G=${W_G:-5.0}
 GCLOG_DIR="/tmp/build-helium-gclogs"
 SHOW_PROGRESS=1
+CURRENT_CHILD_PID=""
+
+# ---------- Signal handling ----------
+cleanup_on_signal(){
+  stop_spinner || true
+  if [[ -n "${CURRENT_CHILD_PID:-}" ]]; then
+    kill -INT "${CURRENT_CHILD_PID}" >/dev/null 2>&1 || true
+  fi
+  echo "\nAborted." >&2
+  exit 130
+}
+trap cleanup_on_signal INT TERM
 
 # ---------- Args ----------
 while [[ $# -gt 0 ]]; do
@@ -146,17 +158,22 @@ measure_case() {
   local GR_JVMARGS="-Xms512m -Xmx${gr_xmx} -XX:+UseG1GC -Dfile.encoding=UTF-8 -Xlog:gc*:file=${GCLOG_DIR}/gradle-gc-${name}.log:tags,uptime,level"
   local KT_JVMARGS="-Xms256m -Xmx${kt_xmx} -XX:+UseG1GC -Xlog:gc*:file=${GCLOG_DIR}/kotlin-gc-${name}.log:tags,uptime,level"
 
-  # Override gradle.properties via ORG_GRADLE_PROJECT_* env
-  export ORG_GRADLE_PROJECT_org__gradle__jvmargs="${GR_JVMARGS}"
-  export ORG_GRADLE_PROJECT_kotlin__daemon__jvmargs="${KT_JVMARGS}"
-  export ORG_GRADLE_PROJECT_org__gradle__workers__max="${workers}"
+  # Create per-run init script to reliably override JVM/worker settings
+  local tmp_init; tmp_init="$(mktemp -t helium-init-XXXXXX.gradle.kts)"
+  cat > "$tmp_init" <<KTS
+gradle.beforeSettings {
+  System.setProperty("org.gradle.jvmargs", "${GR_JVMARGS}")
+  System.setProperty("kotlin.daemon.jvmargs", "${KT_JVMARGS}")
+  System.setProperty("org.gradle.workers.max", "${workers}")
+}
+KTS
 
   ./gradlew --stop >/dev/null 2>&1 || true
   [[ -n "${GRADLE_VERSION_KEY}" ]] && rm -rf "${HOME}/.gradle/daemon/${GRADLE_VERSION_KEY}" >/dev/null 2>&1 || true
 
   # Warmups
   echo "  ~ warmup x${WARMUP_RUNS}"
-  for _ in $(seq 1 "${WARMUP_RUNS}"); do ./gradlew -q "${TASK}" >/dev/null || true; done
+  for _ in $(seq 1 "${WARMUP_RUNS}"); do ./gradlew -I "$tmp_init" -q "${TASK}" >/dev/null || true; done
 
   local total=0 rss_peak=0
   start_spinner
@@ -164,17 +181,16 @@ measure_case() {
     local tmp; tmp="$(mktemp)"
     set +e
     if [[ "$TIME_KIND" == "bsd" ]]; then
-      /usr/bin/time -l ./gradlew "${TASK}" >/dev/null 2>"$tmp"
+      (/usr/bin/time -l ./gradlew -I "$tmp_init" "${TASK}" >/dev/null 2>"$tmp") & CURRENT_CHILD_PID=$!; wait "$CURRENT_CHILD_PID"; local rc=$?
     else
-      /usr/bin/time -v ./gradlew "${TASK}" >/dev/null 2>"$tmp"
+      (/usr/bin/time -v ./gradlew -I "$tmp_init" "${TASK}" >/dev/null 2>"$tmp") & CURRENT_CHILD_PID=$!; wait "$CURRENT_CHILD_PID"; local rc=$?
     fi
-    local rc=$?
     set -e
     if [[ $rc -ne 0 ]]; then
       rm -f "$tmp"
       stop_spinner
       echo "WALL=99999 RSS_KB=99999999 GC_PCT=100.0"
-      unset ORG_GRADLE_PROJECT_org__gradle__jvmargs ORG_GRADLE_PROJECT_kotlin__daemon__jvmargs ORG_GRADLE_PROJECT_org__gradle__workers__max
+      rm -f "$tmp_init"
       return
     fi
 
@@ -224,8 +240,8 @@ PY
 
   echo "WALL=${avg} RSS_KB=${rss_peak} GC_PCT=${gc_pct}"
 
-  # Clean env overrides for next candidate
-  unset ORG_GRADLE_PROJECT_org__gradle__jvmargs ORG_GRADLE_PROJECT_kotlin__daemon__jvmargs ORG_GRADLE_PROJECT_org__gradle__workers__max
+  # Clean per-run init
+  rm -f "$tmp_init"
 }
 
 # ---------- Main loop ----------
@@ -310,13 +326,48 @@ PY
 cp -f "$JSON_OUT" "$LATEST_JSON"
 echo "Wrote JSON: $JSON_OUT"
 
+# ---------- Persist winner to ~/.gradle/gradle-tuner.json ----------
+CFG_PATH="${HOME}/.gradle/gradle-tuner.json"
+tmp_cfg="$(mktemp)"
+"$PYTHON" - <<PY > "$tmp_cfg"
+import json, os, sys
+cfg_path = os.path.expanduser("${CFG_PATH}")
+try:
+  existing = json.load(open(cfg_path))
+except Exception:
+  existing = {}
+existing.update({
+  "gradleVersionKey": "${GRADLE_VERSION_KEY}",
+  "gradleJvmArgs": f"-Xms512m -Xmx${best_gr} -XX:+UseG1GC -Dfile.encoding=UTF-8",
+  "kotlinDaemonJvmArgs": f"-Xms256m -Xmx${best_kt} -XX:+UseG1GC",
+  "workersMax": int(${best_workers})
+})
+os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+with open(cfg_path+".bak", "w") as b:
+  try:
+    json.dump(existing, b, indent=2)
+  except Exception:
+    pass
+json.dump(existing, open(cfg_path, "w"), indent=2)
+print(cfg_path)
+PY
+echo "Persisted tuned config to: $CFG_PATH"
+
 # ---------- Render Markdown & HTML ----------
 if [[ "${NO_MD:-0}" != "1" ]]; then
-  "$(dirname "$0")/render_md.sh" "$JSON_OUT" "${JSON_OUT%.json}.md"
+  if command -v build-helium-render-md >/dev/null 2>&1; then
+    build-helium-render-md "$JSON_OUT" "${JSON_OUT%.json}.md"
+  else
+    "$(dirname "$0")/render_md.sh" "$JSON_OUT" "${JSON_OUT%.json}.md"
+  fi
   cp -f "${JSON_OUT%.json}.md" "${REPORT_DIR}/latest.md"
 fi
 if [[ "${NO_HTML:-0}" != "1" ]]; then
-  "$(dirname "$0")/render_html.sh" "$JSON_OUT" "${JSON_OUT%.json}.html"
+  if command -v build-helium-render-html >/dev/null 2>&1; then
+    build-helium-render-html "$JSON_OUT" "${JSON_OUT%.json}.html"
+  else
+    "$(dirname "$0")/render_html.sh" "$JSON_OUT" "${JSON_OUT%.json}.html"
+  fi
   cp -f "${JSON_OUT%.json}.html" "${REPORT_DIR}/latest.html"
 fi
 
