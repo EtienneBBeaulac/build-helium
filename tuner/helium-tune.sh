@@ -195,11 +195,11 @@ KTS
 
   # Warmups
   echo "  ~ warmup x${WARMUP_RUNS}"
-  for _ in $(seq 1 "${WARMUP_RUNS}"); do ./gradlew -I "$tmp_init" -q "${TASK}" >/dev/null || true; done
+  for ((i=1; i<=WARMUP_RUNS; i++)); do ./gradlew -I "$tmp_init" -q "${TASK}" >/dev/null || true; done
 
   local total=0 rss_peak=0
   start_spinner
-  for _ in $(seq 1 "${MEASURED_RUNS}"); do
+  for ((i=1; i<=MEASURED_RUNS; i++)); do
     local tmp; tmp="$(mktemp)"
     set +e
     if [[ "$TIME_KIND" == "bsd" ]]; then
@@ -227,18 +227,31 @@ KTS
     [[ -z "${rss_kb:-}" ]] && rss_kb=0
     rm -f "$tmp"
 
-    total=$("$PYTHON" - <<PY
-t=${total}; add=float("${real_s:-0}" or 0)
-print(round(t+add,3))
+    total=$("$PYTHON" - <<'PY' "${total}" "${real_s:-0}"
+import sys
+try:
+    t = float(sys.argv[1])
+except Exception:
+    t = 0.0
+try:
+    add = float(sys.argv[2])
+except Exception:
+    add = 0.0
+print(round(t + add, 3))
 PY
 )
     if [[ "${rss_kb:-0}" -gt "${rss_peak:-0}" ]]; then rss_peak="$rss_kb"; fi
   done
   stop_spinner
 
-  local avg; avg=$("$PYTHON" - <<PY
-t=float("${total}"); n=float("${MEASURED_RUNS}")
-print(round(t/n,3))
+  local avg; avg=$("$PYTHON" - <<'PY' "${total}" "${MEASURED_RUNS}"
+import sys
+try:
+    t = float(sys.argv[1])
+    n = float(sys.argv[2])
+    print(round(t/n, 3))
+except Exception:
+    print(0.0)
 PY
 )
 
@@ -246,17 +259,25 @@ PY
   pauses_ms=$(grep -a "Pause" "${GCLOG_DIR}/gradle-gc-${name}.log" 2>/dev/null | sed -E 's/.* ([0-9]+)ms[),].*/\1/g' | awk '{s+=$1} END{print s+0}')
   first_s=$(head -n1 "${GCLOG_DIR}/gradle-gc-${name}.log" 2>/dev/null | sed -nE 's/.*\[([0-9]+\.[0-9]+)s\].*/\1/p')
   last_s=$( tail -n1 "${GCLOG_DIR}/gradle-gc-${name}.log" 2>/dev/null | sed -nE 's/.*\[([0-9]+\.[0-9]+)s\].*/\1/p')
-  window_ms=$("$PYTHON" - <<PY
+  window_ms=$("$PYTHON" - <<'PY' "${first_s:-0}" "${last_s:-0}"
+import sys
 try:
-  fs=float("${first_s or 0}"); ls=float("${last_s or 0}")
-  w=(ls-fs)*1000.0
-  print(int(w if w>0 else 1))
-except: print(1)
+    fs = float(sys.argv[1])
+    ls = float(sys.argv[2])
+    w = (ls - fs) * 1000.0
+    print(int(w if w > 0 else 1))
+except Exception:
+    print(1)
 PY
 )
-  gc_pct=$("$PYTHON" - <<PY
-p=float("${pauses_ms or 0}"); w=float("${window_ms or 1}")
-print(round((p/w)*100.0,2))
+  gc_pct=$("$PYTHON" - <<'PY' "${pauses_ms:-0}" "${window_ms:-1}"
+import sys
+try:
+    p = float(sys.argv[1])
+    w = float(sys.argv[2])
+    print(round((p / (w if w != 0 else 1)) * 100.0, 2))
+except Exception:
+    print(0.0)
 PY
 )
 
@@ -290,10 +311,14 @@ for tuple in "${CANDIDATES[@]}"; do
   echo "  -> $metrics"
   eval "$metrics"
 
-  score=$("$PYTHON" - <<PY
-t=float("${WALL}"); r=float("${RSS_KB}"); g=float("${GC_PCT}")
-Wt=float("${W_T}"); Wr=float("${W_R}"); Wg=float("${W_G}")
-print(round(Wt*t + Wr*r + Wg*(g/100.0), 4))
+  score=$("$PYTHON" - <<'PY' "${WALL}" "${RSS_KB}" "${GC_PCT}" "${W_T}" "${W_R}" "${W_G}"
+import sys
+try:
+    t = float(sys.argv[1]); r = float(sys.argv[2]); g = float(sys.argv[3])
+    Wt = float(sys.argv[4]); Wr = float(sys.argv[5]); Wg = float(sys.argv[6])
+    print(round(Wt*t + Wr*r + Wg*(g/100.0), 4))
+except Exception:
+    print(9e9)
 PY
 )
   echo "  -> score=${score}"
@@ -324,34 +349,51 @@ echo "  wall=${best_wall}s rss=${best_rss}KB gc=${best_gc}%"
 echo "  gradleXmx=${best_gr} kotlinXmx=${best_kt} workers=${best_workers}"
 
 # ---------- Write canonical JSON ----------
-"$PYTHON" - <<PY > "$JSON_OUT"
-import json, os
-rows = ${ROWS@P}
+{
+  printf '%s\n' "${ROWS[@]}" | "$PYTHON" - <<'PY' "${JSON_OUT}" "${STAMP}" "${CORES}" "${RAM_GB}" "${GRADLE_VERSION_KEY:-}" "${TASK}" "${WARMUP_RUNS}" "${MEASURED_RUNS}" "${W_T}" "${W_R}" "${W_G}" "${best_name}" "${best_gr}" "${best_kt}" "${best_workers}" "${best_wall}" "${best_rss}" "${best_gc}" "${best_score}" "${best_gcrel}"
+import sys, json, os
+
+out_path = sys.argv[1]
+STAMP, CORES, RAM_GB = sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+GRADLE_VERSION_KEY, TASK = sys.argv[5], sys.argv[6]
+WARMUPS, MEASURED = int(sys.argv[7]), int(sys.argv[8])
+W_T, W_R, W_G = float(sys.argv[9]), float(sys.argv[10]), float(sys.argv[11])
+best_name, best_gr, best_kt = sys.argv[12], sys.argv[13], sys.argv[14]
+best_workers = int(sys.argv[15])
+best_wall, best_rss, best_gc = float(sys.argv[16]), int(float(sys.argv[17])), float(sys.argv[18])
+best_score = float(sys.argv[19])
+best_gcrel = sys.argv[20]
+
+rows = sys.stdin.read().splitlines()
 def parse(r):
-    n,gx,kx,w,wall,rss,gc,score,gcrel = r.split("|")
+    n,gx,kx,w,wall,rss,gc,score,gcrel = r.split('|')
     return dict(name=n, gradleXmx=gx, kotlinXmx=kx, workers=int(w),
                 wallSec=float(wall), rssKB=int(float(rss)), gcPct=float(gc), score=float(score), gcReliable=(gcrel=='1'))
+
 doc = {
-  "version":"1",
-  "generatedAt":"${STAMP}",
-  "host": {"cpuCores": ${CORES}, "ramGB": ${RAM_GB}, "os": "$(uname -s)", "arch": "$(uname -m)"},
-  "gradle": {"version":"${GRADLE_VERSION_KEY:-}", "task":"${TASK}"},
-  "runs": {"warmups": ${WARMUP_RUNS}, "measured": ${MEASURED_RUNS}},
-  "weights": {"W_T": ${W_T}, "W_R": ${W_R}, "W_G": ${W_G}},
-  "candidates": [parse(r) for r in rows],
+  "version": "1",
+  "generatedAt": STAMP,
+  "host": {"cpuCores": CORES, "ramGB": RAM_GB, "os": os.uname().sysname, "arch": os.uname().machine},
+  "gradle": {"version": GRADLE_VERSION_KEY, "task": TASK},
+  "runs": {"warmups": WARMUPS, "measured": MEASURED},
+  "weights": {"W_T": W_T, "W_R": W_R, "W_G": W_G},
+  "candidates": [parse(r) for r in rows if r.strip()],
   "winner": {
-      "name":"${best_name}", "gradleXmx":"${best_gr}", "kotlinXmx":"${best_kt}", "workers": ${best_workers},
-      "wallSec": ${best_wall}, "rssKB": ${best_rss}, "gcPct": ${best_gc}, "score": ${best_score}, "gcReliable": ${best_gcrel},
+      "name": best_name, "gradleXmx": best_gr, "kotlinXmx": best_kt, "workers": best_workers,
+      "wallSec": best_wall, "rssKB": best_rss, "gcPct": best_gc, "score": best_score, "gcReliable": (best_gcrel=='1'),
       "flags": {
-        "gradleJvmArgs": "-Xms512m -Xmx${best_gr} -XX:+UseG1GC -Dfile.encoding=UTF-8",
-        "kotlinDaemonJvmArgs": "-Xms256m -Xmx${best_kt} -XX:+UseG1GC",
-        "workersMax": ${best_workers},
-        "useCompressedOops": true
+        "gradleJvmArgs": f"-Xms512m -Xmx{best_gr} -XX:+UseG1GC -Dfile.encoding=UTF-8",
+        "kotlinDaemonJvmArgs": f"-Xms256m -Xmx{best_kt} -XX:+UseG1GC",
+        "workersMax": best_workers,
+        "useCompressedOops": True
       }
   }
 }
-json.dump(doc, open("${JSON_OUT}", "w"), indent=2)
+
+with open(out_path, 'w', encoding='utf-8') as f:
+    json.dump(doc, f, indent=2)
 PY
+}
 
 cp -f "$JSON_OUT" "$LATEST_JSON"
 echo "Wrote JSON: $JSON_OUT"
