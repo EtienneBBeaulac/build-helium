@@ -260,7 +260,15 @@ print(round((p/w)*100.0,2))
 PY
 )
 
-  echo "WALL=${avg} RSS_KB=${rss_peak} GC_PCT=${gc_pct}"
+  local gc_rel; gc_rel=$("$PYTHON" - <<PY
+try:
+  fs=float("${first_s or 0}"); ls=float("${last_s or 0}")
+  print(1 if ls>fs else 0)
+except: print(0)
+PY
+)
+
+  echo "WALL=${avg} RSS_KB=${rss_peak} GC_PCT=${gc_pct} GC_REL=${gc_rel}"
 
   # Clean per-run init
   rm -f "$tmp_init"
@@ -269,7 +277,7 @@ PY
 # ---------- Main loop ----------
 declare -a ROWS
 best_name=""; best_score=""; best_wall=""; best_rss=""; best_gc=""
-best_gr=""; best_kt=""; best_workers=""
+best_gr=""; best_kt=""; best_workers=""; best_gcrel="1"
 any_success=0
 
 for tuple in "${CANDIDATES[@]}"; do
@@ -290,7 +298,7 @@ PY
 )
   echo "  -> score=${score}"
 
-  ROWS+=("${name}|${gr}|${kt}|${wk}|${WALL}|${RSS_KB}|${GC_PCT}|${score}")
+  ROWS+=("${name}|${gr}|${kt}|${wk}|${WALL}|${RSS_KB}|${GC_PCT}|${score}|${GC_REL}")
 
   # Consider success if WALL not sentinel
   if [[ "$(printf %.0f "${WALL}")" -lt 99999 ]]; then any_success=1; fi
@@ -301,7 +309,7 @@ PY
   then
     best_score="$score"; best_name="$name"
     best_wall="$WALL"; best_rss="$RSS_KB"; best_gc="$GC_PCT"
-    best_gr="$gr"; best_kt="$kt"; best_workers="$wk"
+    best_gr="$gr"; best_kt="$kt"; best_workers="$wk"; best_gcrel="$GC_REL"
   fi
 done
 
@@ -320,9 +328,9 @@ echo "  gradleXmx=${best_gr} kotlinXmx=${best_kt} workers=${best_workers}"
 import json, os
 rows = ${ROWS@P}
 def parse(r):
-    n,gx,kx,w,wall,rss,gc,score = r.split("|")
+    n,gx,kx,w,wall,rss,gc,score,gcrel = r.split("|")
     return dict(name=n, gradleXmx=gx, kotlinXmx=kx, workers=int(w),
-                wallSec=float(wall), rssKB=int(float(rss)), gcPct=float(gc), score=float(score))
+                wallSec=float(wall), rssKB=int(float(rss)), gcPct=float(gc), score=float(score), gcReliable=(gcrel=='1'))
 doc = {
   "version":"1",
   "generatedAt":"${STAMP}",
@@ -333,7 +341,7 @@ doc = {
   "candidates": [parse(r) for r in rows],
   "winner": {
       "name":"${best_name}", "gradleXmx":"${best_gr}", "kotlinXmx":"${best_kt}", "workers": ${best_workers},
-      "wallSec": ${best_wall}, "rssKB": ${best_rss}, "gcPct": ${best_gc}, "score": ${best_score},
+      "wallSec": ${best_wall}, "rssKB": ${best_rss}, "gcPct": ${best_gc}, "score": ${best_score}, "gcReliable": ${best_gcrel},
       "flags": {
         "gradleJvmArgs": "-Xms512m -Xmx${best_gr} -XX:+UseG1GC -Dfile.encoding=UTF-8",
         "kotlinDaemonJvmArgs": "-Xms256m -Xmx${best_kt} -XX:+UseG1GC",
@@ -397,3 +405,8 @@ echo "Reports in: $REPORT_DIR"
 [[ -f "${REPORT_DIR}/latest.html" ]] && echo "Latest HTML: ${REPORT_DIR}/latest.html"
 [[ -f "${REPORT_DIR}/latest.md"   ]] && echo "Latest MD:   ${REPORT_DIR}/latest.md"
 echo "Tip: run 'helium-tune :app:assembleDebug' to tune against your real build."
+
+# Optional: cleanup per-session GC logs (set KEEP_GCLOGS=1 to retain)
+if [[ "${KEEP_GCLOGS:-0}" != "1" ]]; then
+  rm -rf "$GCLOG_DIR" >/dev/null 2>&1 || true
+fi

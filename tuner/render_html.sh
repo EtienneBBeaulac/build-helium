@@ -68,6 +68,8 @@ w_rss = gb(w.get('rssKB', 0))
 w_gc  = fmt(w.get('gcPct'), 1)
 w_score = fmt(w.get('score'), 1)
 w_name = escape(winner_name)
+gcr = w.get('gcReliable', True)
+gcn = " (GC% may be unreliable)" if not gcr else ""
 
 wf = w.get('flags', {})
 gradle_args = escape(str(wf.get('gradleJvmArgs','')))
@@ -117,7 +119,7 @@ a:hover{{text-decoration:underline}}
     <div><strong>Winner</strong>: <span class="badge">{w_name}</span> &nbsp; 
       <strong>Wall</strong> {w_wall} s &nbsp; 
       <strong>Peak RSS</strong> {w_rss} &nbsp; 
-      <strong>GC</strong> {w_gc}% &nbsp; 
+      <strong>GC</strong> {w_gc}%{gcn} &nbsp; 
       <strong>Score</strong> {w_score}</div>
   </div>
 

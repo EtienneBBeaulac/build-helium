@@ -49,7 +49,9 @@ runs = d.get('runs', {})
 lines += [f"**Runs:** warmup ×{runs.get('warmups','?')}, measured ×{runs.get('measured','?')}\n"]
 
 winner_name = w.get('name','')
-lines += [f"> **Winner:** `{code(winner_name)}` — fastest with reasonable memory and low GC\n"]
+gcr = w.get('gcReliable', True)
+note = " (GC% may be unreliable)" if not gcr else ""
+lines += [f"> **Winner:** `{code(winner_name)}` — fastest with reasonable memory and low GC{note}\n"]
 
 lines += ["## Summary\n",
           "| Candidate | Gradle Xmx | Kotlin Xmx | Workers | Wall (s) | Peak RSS | GC % | Score |",
