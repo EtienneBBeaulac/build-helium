@@ -83,12 +83,12 @@ abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
         val out = outDir.get().asFile.apply { mkdirs() }
         val inRoot = inDir.get().asFile
 
-        val doDisk = useDisk.get()
+        val doDisk = useDisk.getOrElse(true)
         if (doDisk) inRoot.mkdirs()
 
-        val a = workItems.get()
-        val r = rounds.get()
-        val sz = sizeKB.get()
+        val a = workItems.getOrElse(300)
+        val r = rounds.getOrElse(120)
+        val sz = sizeKB.getOrElse(96)
 
         repeat(a) { idx ->
             val output = File(out, "out-$idx.bin")
@@ -98,7 +98,7 @@ abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
                 f.parentFile.mkdirs()
                 f.outputStream().use { os ->
                     val buf = ByteArray(sz * 1024)
-                    val seed = if (deterministic.get()) idx.toLong() else System.nanoTime() + idx
+                    val seed = if (deterministic.getOrElse(true)) idx.toLong() else System.nanoTime() + idx
                     Random(seed).nextBytes(buf)
                     os.write(buf)
                 }
@@ -112,7 +112,7 @@ abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
                 p.rounds.set(r)
                 p.salt.set(saltStr)
                 p.useDisk.set(doDisk)
-                p.deterministic.set(deterministic.get())
+                p.deterministic.set(deterministic.getOrElse(true))
                 if (inFile != null) p.inputFile.set(inFile)
                 p.outputFile.set(output)
             }
@@ -122,7 +122,7 @@ abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
 
         logger.lifecycle(
             "heliumBenchmark: {} items × {} rounds × {} KB (useDisk={}, deterministic={})",
-            a, r, sz, doDisk, deterministic.get()
+            a, r, sz, doDisk, deterministic.getOrElse(true)
         )
     }
 }
@@ -192,4 +192,22 @@ gradle.rootProject {
         propBool("helium.useDisk")?.let { useDisk.set(it) }
         propBool("helium.deterministic")?.let { deterministic.set(it) }
     }
+
+    // Clean helper: removes build/helium across all projects
+    tasks.register("heliumClean") {
+        group = "verification"
+        description = "Delete build/helium inputs/outputs in all projects."
+        doLast {
+            project.rootProject.allprojects.forEach { proj ->
+                val dir = proj.layout.buildDirectory.dir("helium").get().asFile
+                if (dir.exists()) {
+                    proj.delete(dir)
+                }
+            }
+        }
+    }
+
+    // Finalizers so normal runs auto-clean
+    heliumBenchmark.configure { finalizedBy("heliumClean") }
+    heliumBenchmarkBig.configure { finalizedBy("heliumClean") }
 }

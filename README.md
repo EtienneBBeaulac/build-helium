@@ -182,6 +182,21 @@ MIT — do what you want, just credit.
 ⸻
 
 Example session
+Cleanup
+
+During runs with disk I/O enabled, temporary inputs/outputs are created under `build/helium/{inputs,outputs}`.
+
+- Clean via Gradle task (all projects):
+```bash
+./gradlew heliumClean
+```
+- Or use the CLI helper:
+```bash
+helium-clean
+```
+
+Auto-clean: normal runs of `heliumBenchmark` and `heliumBenchmarkBig` finalize with `heliumClean`. A hard interrupt (Ctrl+C) may stop the build before finalizers; in that case, run one of the clean commands above.
+
 ```bash
 $ helium-tune
 build-helium: 12 cores, 64 GB RAM

@@ -29,6 +29,10 @@ echo "[build-helium] Installing…"
 fetch "tuner/helium-tune.sh" "${BIN_DIR}/helium-tune"
 chmod +x "${BIN_DIR}/helium-tune"
 
+# Cleanup CLI
+fetch "tuner/helium-clean.sh" "${BIN_DIR}/helium-clean"
+chmod +x "${BIN_DIR}/helium-clean"
+
 # ---------- 2) Renderers (JSON -> Markdown/HTML) ----------
 fetch "tuner/render_md.sh"   "${BIN_DIR}/build-helium-render-md"
 fetch "tuner/render_html.sh" "${BIN_DIR}/build-helium-render-html"
@@ -91,6 +95,7 @@ echo "[build-helium] Installed."
 echo "Commands:"
 echo "  helium-tune                     # tune using synthetic heliumBenchmark"
 echo "  helium-tune ':app:assembleDebug'  # tune against your real build"
+echo "  helium-clean                   # delete build/helium across all projects"
 echo
 echo "Renderer helpers (optional to run manually):"
 echo "  build-helium-render-md   <report.json> [out.md]"
