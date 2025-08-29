@@ -23,9 +23,10 @@ MEASURED_RUNS=${MEASURED_RUNS:-2}
 W_T=${W_T:-1.0}                        # score weights
 W_R=${W_R:-0.00001}
 W_G=${W_G:-5.0}
-GCLOG_DIR="/tmp/build-helium-gclogs"
+GCLOG_BASE="/tmp/build-helium-gclogs"
 SHOW_PROGRESS=1
 CURRENT_CHILD_PID=""
+TIME_CMD=""
 
 # ---------- Signal handling ----------
 cleanup_on_signal(){
@@ -77,6 +78,15 @@ HELP
 done
 [[ -z "${TAG}" ]] && TAG="-$TASK"
 
+# ---------- Validate/normalize run counts ----------
+if [[ "${MEASURED_RUNS}" -lt 1 ]]; then
+  echo "Error: MEASURED_RUNS must be >= 1 (got ${MEASURED_RUNS})." >&2
+  exit 2
+fi
+if [[ "${WARMUP_RUNS}" -lt 0 ]]; then
+  WARMUP_RUNS=0
+fi
+
 # ---------- Sanity checks ----------
 if [[ ! -x "./gradlew" ]]; then
   echo "Error: ./gradlew not found. Run helium-tune from a Gradle project root." >&2
@@ -84,8 +94,17 @@ if [[ ! -x "./gradlew" ]]; then
 fi
 
 detect_time_cmd() {
-  if /usr/bin/time -l true >/dev/null 2>&1; then echo "bsd"; return; fi   # macOS bsd time
-  if /usr/bin/time -v true >/dev/null 2>&1; then echo "gnu"; return; fi   # GNU time
+  if /usr/bin/time -l true >/dev/null 2>&1; then TIME_CMD="/usr/bin/time"; echo "bsd"; return; fi   # macOS bsd time
+  if /usr/bin/time -v true >/dev/null 2>&1; then TIME_CMD="/usr/bin/time"; echo "gnu"; return; fi   # GNU time
+  if command -v gtime >/dev/null 2>&1; then
+    if gtime -v true >/dev/null 2>&1; then TIME_CMD="$(command -v gtime)"; echo "gnu"; return; fi
+  fi
+  local t
+  t="$(command -v time 2>/dev/null || true)"
+  if [[ -n "$t" && "$t" != "time" ]]; then
+    if "$t" -l true >/dev/null 2>&1; then TIME_CMD="$t"; echo "bsd"; return; fi
+    if "$t" -v true >/dev/null 2>&1; then TIME_CMD="$t"; echo "gnu"; return; fi
+  fi
   echo "none"
 }
 TIME_KIND="$(detect_time_cmd)"
@@ -94,11 +113,14 @@ if [[ "$TIME_KIND" == "none" ]]; then
   exit 1
 fi
 
-mkdir -p "$REPORT_DIR" "$GCLOG_DIR"
+mkdir -p "$REPORT_DIR"
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 JSON_OUT="${REPORT_DIR}/report-${STAMP}${TAG}.json"
 LATEST_JSON="${REPORT_DIR}/latest.json"
+
+GCLOG_DIR="${GCLOG_BASE}/${STAMP}"
+mkdir -p "$GCLOG_DIR"
 
 # ---------- Host detection ----------
 detect_cores(){ command -v sysctl >/dev/null && sysctl -n hw.ncpu || nproc; }
@@ -181,9 +203,9 @@ KTS
     local tmp; tmp="$(mktemp)"
     set +e
     if [[ "$TIME_KIND" == "bsd" ]]; then
-      (/usr/bin/time -l ./gradlew -I "$tmp_init" "${TASK}" >/dev/null 2>"$tmp") & CURRENT_CHILD_PID=$!; wait "$CURRENT_CHILD_PID"; local rc=$?
+      ("$TIME_CMD" -l ./gradlew -I "$tmp_init" "${TASK}" >/dev/null 2>"$tmp") & CURRENT_CHILD_PID=$!; wait "$CURRENT_CHILD_PID"; local rc=$?
     else
-      (/usr/bin/time -v ./gradlew -I "$tmp_init" "${TASK}" >/dev/null 2>"$tmp") & CURRENT_CHILD_PID=$!; wait "$CURRENT_CHILD_PID"; local rc=$?
+      ("$TIME_CMD" -v ./gradlew -I "$tmp_init" "${TASK}" >/dev/null 2>"$tmp") & CURRENT_CHILD_PID=$!; wait "$CURRENT_CHILD_PID"; local rc=$?
     fi
     set -e
     if [[ $rc -ne 0 ]]; then
