@@ -135,6 +135,15 @@ CORES="$(detect_cores)"
 RAM_GB="$(detect_ram_gb)"
 GRADLE_VERSION_KEY="$(./gradlew -v 2>/dev/null | awk '/Gradle /{print $2; exit}' || echo "")"
 
+# Detect Java version used by Gradle to choose compatible GC logging flags
+JAVA_VERSION_RAW="$(./gradlew -v 2>/dev/null | awk '/JVM:/{print $2; exit}' || echo "")"
+if [[ "$JAVA_VERSION_RAW" == 1.* ]]; then
+  JAVA_MAJOR=8
+else
+  JAVA_MAJOR="${JAVA_VERSION_RAW%%.*}"
+  [[ -z "$JAVA_MAJOR" ]] && JAVA_MAJOR=11
+fi
+
 echo "build-helium: ${CORES} cores, ${RAM_GB} GB RAM"
 echo "Task: ${TASK}"
 
@@ -177,8 +186,16 @@ stop_spinner(){
 measure_case() {
   local name="$1" gr_xmx="$2" kt_xmx="$3" workers="$4"
 
-  local GR_JVMARGS="-Xms512m -Xmx${gr_xmx} -XX:+UseG1GC -Dfile.encoding=UTF-8 -Xlog:gc*:file=${GCLOG_DIR}/gradle-gc-${name}.log:tags,uptime,level"
-  local KT_JVMARGS="-Xms256m -Xmx${kt_xmx} -XX:+UseG1GC -Xlog:gc*:file=${GCLOG_DIR}/kotlin-gc-${name}.log:tags,uptime,level"
+  local GC_GRADLE_FLAG GC_KOTLIN_FLAG
+  if [[ "${JAVA_MAJOR}" -ge 9 ]]; then
+    GC_GRADLE_FLAG="-Xlog:gc*:file=${GCLOG_DIR}/gradle-gc-${name}.log:tags,uptime,level"
+    GC_KOTLIN_FLAG="-Xlog:gc*:file=${GCLOG_DIR}/kotlin-gc-${name}.log:tags,uptime,level"
+  else
+    GC_GRADLE_FLAG="-XX:+PrintGC -XX:+PrintGCDetails -XX:+PrintGCTimeStamps -Xloggc:${GCLOG_DIR}/gradle-gc-${name}.log"
+    GC_KOTLIN_FLAG="-XX:+PrintGC -XX:+PrintGCDetails -XX:+PrintGCTimeStamps -Xloggc:${GCLOG_DIR}/kotlin-gc-${name}.log"
+  fi
+  local GR_JVMARGS="-Xms512m -Xmx${gr_xmx} -XX:+UseG1GC -Dfile.encoding=UTF-8 ${GC_GRADLE_FLAG}"
+  local KT_JVMARGS="-Xms256m -Xmx${kt_xmx} -XX:+UseG1GC ${GC_KOTLIN_FLAG}"
 
   # Create per-run init script to reliably override JVM/worker settings
   local tmp_init; tmp_init="$(mktemp -t helium-init-XXXXXX.gradle.kts)"
@@ -194,7 +211,7 @@ KTS
   [[ -n "${GRADLE_VERSION_KEY}" ]] && rm -rf "${HOME}/.gradle/daemon/${GRADLE_VERSION_KEY}" >/dev/null 2>&1 || true
 
   # Warmups
-  echo "  ~ warmup x${WARMUP_RUNS}"
+  echo "  ~ warmup x${WARMUP_RUNS}" >&2
   for ((i=1; i<=WARMUP_RUNS; i++)); do ./gradlew -I "$tmp_init" -q "${TASK}" >/dev/null || true; done
 
   local total=0 rss_peak=0
@@ -281,11 +298,14 @@ except Exception:
 PY
 )
 
-  local gc_rel; gc_rel=$("$PYTHON" - <<PY
+  local gc_rel; gc_rel=$("$PYTHON" - <<'PY' "${first_s:-0}" "${last_s:-0}"
+import sys
 try:
-  fs=float("${first_s or 0}"); ls=float("${last_s or 0}")
-  print(1 if ls>fs else 0)
-except: print(0)
+    fs = float(sys.argv[1])
+    ls = float(sys.argv[2])
+    print(1 if ls > fs else 0)
+except Exception:
+    print(0)
 PY
 )
 
