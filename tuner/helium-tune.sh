@@ -135,14 +135,23 @@ CORES="$(detect_cores)"
 RAM_GB="$(detect_ram_gb)"
 GRADLE_VERSION_KEY="$(./gradlew -v 2>/dev/null | awk '/Gradle /{print $2; exit}' || echo "")"
 
-# Detect Java version used by Gradle to choose compatible GC logging flags
-JAVA_VERSION_RAW="$(./gradlew -v 2>/dev/null | awk '/JVM:/{print $2; exit}' || echo "")"
-if [[ "$JAVA_VERSION_RAW" == 1.* ]]; then
-  JAVA_MAJOR=8
-else
-  JAVA_MAJOR="${JAVA_VERSION_RAW%%.*}"
-  [[ -z "$JAVA_MAJOR" ]] && JAVA_MAJOR=11
-fi
+# Detect Java version (best-effort) to choose compatible GC logging flags
+detect_java_major() {
+  local line v
+  line="$(./gradlew -v 2>/dev/null | grep -m1 '^JVM:' || true)"
+  v="$(printf '%s' "$line" | sed -nE 's/.*([0-9]+(\.[0-9]+)?).*/\1/p' | head -n1)"
+  if [[ -z "$v" ]]; then
+    line="$(java -version 2>&1 | head -n1 || true)"
+    v="$(printf '%s' "$line" | sed -nE 's/.*"([0-9]+(\.[0-9]+)?).*/\1/p' | head -n1)"
+  fi
+  if [[ "$v" == 1.* ]]; then
+    echo 8
+  else
+    echo "${v%%.*}"
+  fi
+}
+JAVA_MAJOR="$(detect_java_major || echo 11)"
+case "$JAVA_MAJOR" in ""|*[!0-9]*) JAVA_MAJOR=11;; esac
 
 echo "build-helium: ${CORES} cores, ${RAM_GB} GB RAM"
 echo "Task: ${TASK}"
@@ -207,8 +216,21 @@ gradle.beforeSettings {
 }
 KTS
 
+  # Fast test mode: skip real Gradle/time execution
+  if [[ "${HELIUM_FAKE_MEASURE:-0}" == "1" ]]; then
+    if [[ "${TASK}" == "help" ]]; then
+      echo "WALL=1.0 RSS_KB=1024 GC_PCT=0.1 GC_REL=1"
+    else
+      echo "WALL=99999 RSS_KB=99999999 GC_PCT=100.0 GC_REL=0"
+    fi
+    rm -f "$tmp_init"
+    return
+  fi
+
   ./gradlew --stop >/dev/null 2>&1 || true
-  [[ -n "${GRADLE_VERSION_KEY}" ]] && rm -rf "${HOME}/.gradle/daemon/${GRADLE_VERSION_KEY}" >/dev/null 2>&1 || true
+  if [[ "${HELIUM_AGGRESSIVE_DAEMON_CLEAN:-0}" == "1" && -n "${GRADLE_VERSION_KEY}" ]]; then
+    rm -rf "${HOME}/.gradle/daemon/${GRADLE_VERSION_KEY}" >/dev/null 2>&1 || true
+  fi
 
   # Warmups
   echo "  ~ warmup x${WARMUP_RUNS}" >&2

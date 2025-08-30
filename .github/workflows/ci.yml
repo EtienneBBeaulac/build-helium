@@ -1,0 +1,92 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    name: Shell lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -y && sudo apt-get install -y shellcheck
+      - name: Run shellcheck on .sh files
+        run: |
+          set -eux
+          files=$(git ls-files '*.sh' || true)
+          if [ -n "$files" ]; then
+            shellcheck -S style $files
+          fi
+
+  tuner-smoke:
+    name: Tuner smoke
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: [ '11', '17' ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+      - name: Install dependencies
+        run: sudo apt-get update -y && sudo apt-get install -y jq gradle
+      - name: Create sample Gradle project
+        run: |
+          set -eux
+          mkdir -p sample && cd sample
+          timeout 60s gradle -q init --type basic || true
+          timeout 60s gradle wrapper || true
+      - name: Run tuner against help
+        run: |
+          set -eux
+          cd sample
+          mkdir -p "$RUNNER_TEMP/reports"
+          WARMUP_RUNS=0 MEASURED_RUNS=1 timeout 3m \
+            $GITHUB_WORKSPACE/tuner/helium-tune.sh help --no-progress --json-only \
+            --report-dir "$RUNNER_TEMP/reports"
+          test -f "$RUNNER_TEMP/reports/latest.json"
+          jq -e '.gradle.task == "help"' "$RUNNER_TEMP/reports/latest.json"
+          # Renderers
+          $GITHUB_WORKSPACE/tuner/render_md.sh "$RUNNER_TEMP/reports/latest.json" "$RUNNER_TEMP/reports/latest.md"
+          $GITHUB_WORKSPACE/tuner/render_html.sh "$RUNNER_TEMP/reports/latest.json" "$RUNNER_TEMP/reports/latest.html"
+
+  init-benchmark:
+    name: Synthetic benchmark task registration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install gradle
+        run: sudo apt-get update -y && sudo apt-get install -y gradle
+      - name: Run heliumBenchmark via init script
+        run: |
+          set -eux
+          tmp=$(mktemp -d); cd "$tmp"
+          timeout 60s gradle -q init --type basic || true
+          timeout 60s gradle wrapper || true
+          timeout 2m gradle -I "$GITHUB_WORKSPACE/init/helium-benchmark.init.gradle.kts" heliumBenchmark \
+            -Phelium.actions=10 -Phelium.repeats=2 -Phelium.sizeKB=1 -Phelium.useDisk=false --no-daemon
+          test ! -d build/helium
+
+  bats:
+    name: Bats tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install bats, jq, gradle
+        run: sudo apt-get update -y && sudo apt-get install -y bats jq gradle
+      - name: Run bats
+        run: bats -r test
+
+
