@@ -70,8 +70,8 @@ fi
 
 if ! echo ":$PATH:" | grep -q ":${HOME}/bin:"; then
   for PROFILE in "${PROFILE_FILES[@]}"; do
-    if ! grep -qs 'export PATH="$HOME/bin:$PATH"' "$PROFILE"; then
-      echo 'export PATH="$HOME/bin:$PATH"' >> "$PROFILE"
+    if ! grep -qs "export PATH=\"\$HOME/bin:\$PATH\"" "$PROFILE"; then
+      echo "export PATH=\"\$HOME/bin:\$PATH\"" >> "$PROFILE"
       echo "[build-helium] Added \$HOME/bin to PATH in ${PROFILE}. Restart your shell or 'source' your profile."
     fi
   done

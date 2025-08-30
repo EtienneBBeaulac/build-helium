@@ -22,11 +22,11 @@ fi
 if [[ "$COLORS" -lt 8 ]]; then USE_COLOR=false; fi
 
 if $USE_COLOR; then
-  C_BOLD="$(tput bold)"; C_DIM="$(tput dim)"; C_RESET="$(tput sgr0)"
-  C_GREEN="$(tput setaf 2)"; C_YELLOW="$(tput setaf 3)"; C_RED="$(tput setaf 1)"; C_CYAN="$(tput setaf 6)"; C_GRAY="$(tput setaf 8)"
+  C_RESET="$(tput sgr0)"
+  C_GREEN="$(tput setaf 2)"; C_YELLOW="$(tput setaf 3)"; C_RED="$(tput setaf 1)"; C_GRAY="$(tput setaf 8)"
   EMOJI_OK="✅ "; EMOJI_WARN="⚠️  "; EMOJI_FAIL="❌ "
 else
-  C_BOLD=""; C_DIM=""; C_RESET=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_CYAN=""; C_GRAY=""
+  C_RESET=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_GRAY=""
 fi
 
 # ---------- Defaults ----------
@@ -46,10 +46,10 @@ REINSTALL=false
 
 # ---------- Logging ----------
 log() {
-  $QUIET && return 0 || true
+  if $QUIET; then return 0; fi
   printf "%s %s\n" "$BRAND" "$*"
 }
-logv() { $VERBOSE && log "$*" || true; }
+logv() { if $VERBOSE; then log "$*"; fi }
 warn() { printf "%s %s%s%s\n" "$BRAND" "$C_YELLOW$EMOJI_WARN" "$*" "$C_RESET"; }
 err() { printf "%s %s%s%s\n" "$BRAND" "$C_RED$EMOJI_FAIL" "$*" "$C_RESET" 1>&2; }
 ok()  { printf "%s %s%s%s\n" "$BRAND" "$C_GREEN$EMOJI_OK" "$*" "$C_RESET"; }
@@ -294,7 +294,7 @@ else
   log "Next steps: restart your shell or run: source ~/.zshrc"
 fi
 if ((${#zshrc_blockers[@]} > 0)); then
-  warn "~/.zshrc blockers detected:"
+  warn "$HOME/.zshrc blockers detected:"
   for b in "${zshrc_blockers[@]}"; do log "  - ${b}"; done
 fi
 

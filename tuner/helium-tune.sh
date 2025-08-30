@@ -34,7 +34,7 @@ cleanup_on_signal(){
   if [[ -n "${CURRENT_CHILD_PID:-}" ]]; then
     kill -INT "${CURRENT_CHILD_PID}" >/dev/null 2>&1 || true
   fi
-  echo "\nAborted." >&2
+  printf "\nAborted.\n" >&2
   exit 130
 }
 trap cleanup_on_signal INT TERM
@@ -77,6 +77,9 @@ HELP
   esac
 done
 [[ -z "${TAG}" ]] && TAG="-$TASK"
+
+# Export optional mode flag (may be consumed by external helpers)
+export JSON_ONLY
 
 # ---------- Validate/normalize run counts ----------
 if [[ "${MEASURED_RUNS}" -lt 1 ]]; then
@@ -123,7 +126,7 @@ GCLOG_DIR="${GCLOG_BASE}/${STAMP}"
 mkdir -p "$GCLOG_DIR"
 
 # ---------- Host detection ----------
-detect_cores(){ command -v sysctl >/dev/null && sysctl -n hw.ncpu || nproc; }
+detect_cores(){ if command -v sysctl >/dev/null; then sysctl -n hw.ncpu; else nproc; fi }
 detect_ram_gb(){
   if command -v sysctl >/dev/null; then
     echo $(( $(sysctl -n hw.memsize) / 1024 / 1024 / 1024 ))
@@ -186,7 +189,7 @@ start_spinner(){
   ) & spinner_pid=$!
 }
 stop_spinner(){
-  [[ -n "${spinner_pid}" ]] && kill "${spinner_pid}" >/dev/null 2>&1 || true
+  if [[ -n "${spinner_pid}" ]]; then kill "${spinner_pid}" >/dev/null 2>&1 || true; fi
   spinner_pid=""
   [[ "${SHOW_PROGRESS}" == "1" ]] && printf "\r%*s\r" 40 "" >&2
 }
@@ -344,13 +347,14 @@ best_gr=""; best_kt=""; best_workers=""; best_gcrel="1"
 any_success=0
 
 for tuple in "${CANDIDATES[@]}"; do
-  set -- $tuple
-  gr="$1"; kt="$2"; wk="$3"
+  IFS=' ' read -r gr kt wk <<< "$tuple"
   name="G${gr}_K${kt}_W${wk}"
   echo "== ${name} =="
 
   metrics=$(measure_case "$name" "$gr" "$kt" "$wk")
   echo "  -> $metrics"
+  # Predeclare to satisfy static analyzers; real values set by eval below
+  WALL=0; RSS_KB=0; GC_PCT=0; GC_REL=0
   eval "$metrics"
 
   score=$("$PYTHON" - <<'PY' "${WALL}" "${RSS_KB}" "${GC_PCT}" "${W_T}" "${W_R}" "${W_G}"
@@ -392,7 +396,9 @@ echo "  gradleXmx=${best_gr} kotlinXmx=${best_kt} workers=${best_workers}"
 
 # ---------- Write canonical JSON ----------
 {
-  printf '%s\n' "${ROWS[@]}" | "$PYTHON" - <<'PY' "${JSON_OUT}" "${STAMP}" "${CORES}" "${RAM_GB}" "${GRADLE_VERSION_KEY:-}" "${TASK}" "${WARMUP_RUNS}" "${MEASURED_RUNS}" "${W_T}" "${W_R}" "${W_G}" "${best_name}" "${best_gr}" "${best_kt}" "${best_workers}" "${best_wall}" "${best_rss}" "${best_gc}" "${best_score}" "${best_gcrel}"
+  rows_tmp="$(mktemp)"
+  printf '%s\n' "${ROWS[@]}" > "$rows_tmp"
+  "$PYTHON" - <<'PY' "$JSON_OUT" "$STAMP" "$CORES" "$RAM_GB" "${GRADLE_VERSION_KEY:-}" "$TASK" "$WARMUP_RUNS" "$MEASURED_RUNS" "$W_T" "$W_R" "$W_G" "$best_name" "$best_gr" "$best_kt" "$best_workers" "$best_wall" "$best_rss" "$best_gc" "$best_score" "$best_gcrel" "$rows_tmp"
 import sys, json, os
 
 out_path = sys.argv[1]
@@ -405,8 +411,10 @@ best_workers = int(sys.argv[15])
 best_wall, best_rss, best_gc = float(sys.argv[16]), int(float(sys.argv[17])), float(sys.argv[18])
 best_score = float(sys.argv[19])
 best_gcrel = sys.argv[20]
+rows_path = sys.argv[21]
 
-rows = sys.stdin.read().splitlines()
+with open(rows_path, 'r', encoding='utf-8') as rf:
+    rows = rf.read().splitlines()
 def parse(r):
     n,gx,kx,w,wall,rss,gc,score,gcrel = r.split('|')
     return dict(name=n, gradleXmx=gx, kotlinXmx=kx, workers=int(w),
@@ -435,6 +443,7 @@ doc = {
 with open(out_path, 'w', encoding='utf-8') as f:
     json.dump(doc, f, indent=2)
 PY
+  rm -f "$rows_tmp"
 }
 
 cp -f "$JSON_OUT" "$LATEST_JSON"
@@ -488,6 +497,7 @@ fi
 echo "Reports in: $REPORT_DIR"
 [[ -f "${REPORT_DIR}/latest.html" ]] && echo "Latest HTML: ${REPORT_DIR}/latest.html"
 [[ -f "${REPORT_DIR}/latest.md"   ]] && echo "Latest MD:   ${REPORT_DIR}/latest.md"
+[[ "${JSON_ONLY}" == "1" ]] && echo "JSON-only mode: MD/HTML rendering skipped."
 echo "Tip: run 'helium-tune :app:assembleDebug' to tune against your real build."
 
 # Optional: cleanup per-session GC logs (set KEEP_GCLOGS=1 to retain)
