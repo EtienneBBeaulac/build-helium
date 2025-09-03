@@ -100,3 +100,18 @@ echo
 echo "Renderer helpers (optional to run manually):"
 echo "  build-helium-render-md   <report.json> [out.md]"
 echo "  build-helium-render-html <report.json> [out.html]"
+echo
+echo "[build-helium] To use helium-tune immediately, reload your shell:"
+if [[ "$LOGIN_SHELL" == */zsh ]]; then
+  echo "  source ~/.zshrc"
+  echo "  # or: exec zsh -l"
+elif [[ "$LOGIN_SHELL" == */bash ]]; then
+  if [[ "$OS" == "Darwin" ]]; then
+    echo "  source ~/.bash_profile"
+  else
+    echo "  source ~/.bashrc"
+  fi
+  echo "  # or: exec bash -l"
+else
+  echo "  exec ${SHELL:-sh} -l"
+fi
