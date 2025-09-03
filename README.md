@@ -33,7 +33,7 @@ Large Android/Gradle projects often waste memory or time because the defaults ar
 One-liner:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/EtienneBBeaulac/build-helium/main/install.sh)"
+curl -fsSL https://raw.githubusercontent.com/EtienneBBeaulac/build-helium/main/install.sh | bash
 ```
 
 This will:
@@ -45,7 +45,7 @@ This will:
 
 Uninstall:
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/EtienneBBeaulac/build-helium/main/uninstall.sh)"
+curl -fsSL https://raw.githubusercontent.com/EtienneBBeaulac/build-helium/main/uninstall.sh | bash
 ```
 
 ⸻
