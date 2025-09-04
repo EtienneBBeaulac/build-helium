@@ -241,9 +241,14 @@ KTS
 
   local total=0 rss_peak=0
   start_spinner
+  # Prepare persistent logs directory
+  local logs_dir
+  logs_dir="${REPORT_DIR}/logs"
+  mkdir -p "$logs_dir"
+
   for ((i=1; i<=MEASURED_RUNS; i++)); do
     local tmp; tmp="$(mktemp)"
-    local gradle_log; gradle_log="$(mktemp "${TMPDIR:-/tmp}/helium-gradle.XXXXXX")"
+    local gradle_log; gradle_log="${logs_dir}/${STAMP}-${name}-run${i}.gradle.out"
     local gradle_log_abs; gradle_log_abs="$($PYTHON - <<'PY' "$gradle_log"
 import os, sys
 print(os.path.realpath(sys.argv[1]))
@@ -257,9 +262,25 @@ PY
     fi
     set -e
     if [[ $rc -ne 0 ]]; then
+      # Persist a combined failure log (stderr + timing, plus stdout if any)
+      local failure_log; failure_log="${logs_dir}/${STAMP}-${name}.gradle.fail.log"
+      {
+        echo "=== Gradle stderr and timing ===";
+        cat "$tmp" 2>/dev/null || true;
+        if [[ -s "$gradle_log" ]]; then
+          echo;
+          echo "=== Gradle stdout ===";
+          cat "$gradle_log" 2>/dev/null || true;
+        fi
+      } > "$failure_log" 2>/dev/null || true
+      local failure_log_abs; failure_log_abs="$($PYTHON - <<'PY' "$failure_log"
+import os, sys
+print(os.path.realpath(sys.argv[1]))
+PY
+)"
       rm -f "$tmp"
       stop_spinner
-      echo "  ! Gradle failed; see log: $gradle_log_abs" >&2
+      echo "  ! Gradle failed; see log: $failure_log_abs" >&2
       echo "WALL=99999 RSS_KB=99999999 GC_PCT=100.0"
       rm -f "$tmp_init"
       return
