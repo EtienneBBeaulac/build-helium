@@ -32,7 +32,6 @@ import java.security.MessageDigest
 import java.util.Random
 import javax.inject.Inject
 
-@DisableCachingByDefault(because = "Synthetic benchmark must always do work")
 abstract class HeliumBenchmark @Inject constructor() : DefaultTask() {
 
     @get:Inject

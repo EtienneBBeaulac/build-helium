@@ -243,16 +243,18 @@ KTS
   start_spinner
   for ((i=1; i<=MEASURED_RUNS; i++)); do
     local tmp; tmp="$(mktemp)"
+    local gradle_log; gradle_log="$(mktemp -t helium-gradle-XXXXXX.log)"
     set +e
     if [[ "$TIME_KIND" == "bsd" ]]; then
-      ("$TIME_CMD" -l ./gradlew -I "$tmp_init" "${TASK}" >/dev/null 2>"$tmp") & CURRENT_CHILD_PID=$!; wait "$CURRENT_CHILD_PID"; local rc=$?
+      ("$TIME_CMD" -l ./gradlew -I "$tmp_init" "${TASK}" >"$gradle_log" 2>"$tmp") & CURRENT_CHILD_PID=$!; wait "$CURRENT_CHILD_PID"; local rc=$?
     else
-      ("$TIME_CMD" -v ./gradlew -I "$tmp_init" "${TASK}" >/dev/null 2>"$tmp") & CURRENT_CHILD_PID=$!; wait "$CURRENT_CHILD_PID"; local rc=$?
+      ("$TIME_CMD" -v ./gradlew -I "$tmp_init" "${TASK}" >"$gradle_log" 2>"$tmp") & CURRENT_CHILD_PID=$!; wait "$CURRENT_CHILD_PID"; local rc=$?
     fi
     set -e
     if [[ $rc -ne 0 ]]; then
       rm -f "$tmp"
       stop_spinner
+      echo "  ! Gradle failed; see log: $gradle_log" >&2
       echo "WALL=99999 RSS_KB=99999999 GC_PCT=100.0"
       rm -f "$tmp_init"
       return
@@ -268,6 +270,7 @@ KTS
     fi
     [[ -z "${rss_kb:-}" ]] && rss_kb=0
     rm -f "$tmp"
+    rm -f "$gradle_log"
 
     total=$("$PYTHON" - <<'PY' "${total}" "${real_s:-0}"
 import sys
