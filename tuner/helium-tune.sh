@@ -249,21 +249,14 @@ KTS
   for ((i=1; i<=MEASURED_RUNS; i++)); do
     local tmp; tmp="$(mktemp)"
     local gradle_log; gradle_log="${logs_dir}/${STAMP}-${name}-run${i}.gradle.out"
-    local gradle_log_abs; gradle_log_abs="$($PYTHON - <<'PY' "$gradle_log"
-import os, sys
-print(os.path.realpath(sys.argv[1]))
-PY
-)"
     set +e
     local rc
     if [[ "$TIME_KIND" == "bsd" ]]; then
-      "$TIME_CMD" -l ./gradlew -I "$tmp_init" "${TASK}" >"$gradle_log" 2>"$tmp" &
-      CURRENT_CHILD_PID=$!
-      wait "$CURRENT_CHILD_PID"; rc=$?
+      "$TIME_CMD" -l ./gradlew -I "$tmp_init" "${TASK}" >"$gradle_log" 2>"$tmp"
+      rc=$?
     else
-      "$TIME_CMD" -v ./gradlew -I "$tmp_init" "${TASK}" >"$gradle_log" 2>"$tmp" &
-      CURRENT_CHILD_PID=$!
-      wait "$CURRENT_CHILD_PID"; rc=$?
+      "$TIME_CMD" -v ./gradlew -I "$tmp_init" "${TASK}" >"$gradle_log" 2>"$tmp"
+      rc=$?
     fi
     set -e
     if [[ $rc -ne 0 ]]; then
@@ -278,14 +271,9 @@ PY
           cat "$gradle_log" 2>/dev/null || true;
         fi
       } > "$failure_log" 2>/dev/null || true
-      local failure_log_abs; failure_log_abs="$($PYTHON - <<'PY' "$failure_log"
-import os, sys
-print(os.path.realpath(sys.argv[1]))
-PY
-)"
       rm -f "$tmp"
       stop_spinner
-      echo "  ! Gradle failed; see log: $failure_log_abs" >&2
+      echo "  ! Gradle failed; see log: $failure_log" >&2
       echo "WALL=99999 RSS_KB=99999999 GC_PCT=100.0"
       rm -f "$tmp_init"
       return
