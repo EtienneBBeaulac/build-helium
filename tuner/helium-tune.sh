@@ -255,10 +255,15 @@ print(os.path.realpath(sys.argv[1]))
 PY
 )"
     set +e
+    local rc
     if [[ "$TIME_KIND" == "bsd" ]]; then
-      ("$TIME_CMD" -l ./gradlew -I "$tmp_init" "${TASK}" >"$gradle_log" 2>"$tmp") & CURRENT_CHILD_PID=$!; wait "$CURRENT_CHILD_PID"; local rc=$?
+      "$TIME_CMD" -l ./gradlew -I "$tmp_init" "${TASK}" >"$gradle_log" 2>"$tmp" &
+      CURRENT_CHILD_PID=$!
+      wait "$CURRENT_CHILD_PID"; rc=$?
     else
-      ("$TIME_CMD" -v ./gradlew -I "$tmp_init" "${TASK}" >"$gradle_log" 2>"$tmp") & CURRENT_CHILD_PID=$!; wait "$CURRENT_CHILD_PID"; local rc=$?
+      "$TIME_CMD" -v ./gradlew -I "$tmp_init" "${TASK}" >"$gradle_log" 2>"$tmp" &
+      CURRENT_CHILD_PID=$!
+      wait "$CURRENT_CHILD_PID"; rc=$?
     fi
     set -e
     if [[ $rc -ne 0 ]]; then
